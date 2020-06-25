@@ -1,0 +1,368 @@
+<!doctype html>
+<html>
+    <head>
+        <title>VMed Service</title>
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/webrtc-adapter/7.4.0/adapter.min.js"></script>
+        <script type="text/javascript" src="https://code.jquery.com/jquery-3.5.1.min.js" ></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.3.0/socket.io.js"></script>
+        <script type="text/javascript"></script>
+
+        <meta name="viewport" content="width=device-width">
+    </head>
+    <body>
+        <div class="container">
+            <script type="text/javascript">
+
+
+                var dd = 0;
+                $(document).ready(function () {
+
+
+                    var iceServers = [
+
+                        {
+                            'urls': 'stun:15.206.71.40:3478',
+                            'credential': 'rsaftert',
+                            'username': 'razin223'
+                        },
+
+                        {
+                            'urls': 'turn:15.206.71.40:3478?transport=udp',
+                            'credential': 'rsaftert',
+                            'username': 'razin223'
+                        },
+                        {
+                            'urls': 'turn:15.206.71.40:3478',
+                            'credential': 'rsaftert',
+                            'username': 'razin223'
+                        }
+                    ];
+
+
+                    //var socket = io.connect("http://localhost:3000");
+
+                    socket = io.connect("https://vmedsocket.shiramsystem.com");
+
+
+
+
+
+
+
+
+// Handle all messages through this callback
+
+
+                    socket.on('id', (data) => {
+                        $("#socket-id").val(data);
+
+                        startConnection();
+                    });
+
+
+                    socket.on('msg', (data) => {
+
+
+                        switch (data.type) {
+                            case "offer":
+                                $("#remote-id").val(data.from);
+                                onOffer(data.data);
+                                break;
+                            case "answer":
+                                onAnswer(data.data);
+                                break;
+                            case "candidate":
+                                onCandidate(data.data);
+                                break;
+                            case "leave":
+                                onLeave();
+                                break;
+                            default:
+                                break;
+                        }
+                    });
+
+
+                    function send(message) {
+
+
+
+                        message.to = $("#remote-id").val();
+
+
+//                        console.log("sending to server.");
+//                        console.log(message);
+
+                        socket.emit('msg', message);
+                    }
+
+                    var callButton = document.querySelector('#call');
+                    var hangUpButton = document.querySelector('#hang-up');
+
+
+
+
+                    var yourVideo = document.querySelector('#own-video');
+                    var theirVideo = document.querySelector('#remote-video');
+                    var yourConnection, stream;
+
+
+
+
+                    function startConnection() {
+                        if (hasUserMedia()) {
+                            navigator.getUserMedia({video: true, audio: true}, function (myStream) {
+                                stream = myStream;
+                                yourVideo.srcObject = stream;
+                                yourVideo.play();
+                                if (hasRTCPeerConnection()) {
+                                    setupPeerConnection(stream);
+                                } else {
+                                    alert("Sorry, your browser does not support WebRTC.");
+                                }
+
+                            }, function (error) {
+                                console.log(error);
+                            });
+                        } else {
+                            alert("Sorry, your browser does not support WebRTC.");
+                        }
+                    }
+
+                    function setupPeerConnection(stream) {
+
+                        yourConnection = new RTCPeerConnection(iceServers);
+
+                        // Setup stream listening
+                        yourConnection.addStream(stream);
+                        yourConnection.onaddstream = function (e) {
+
+                            if (theirVideo.srcObject) {
+                                return;
+                            }
+                            console.log("remote stream found.");
+                            console.log(e);
+                            theirVideo.srcObject = e.stream;
+                            theirVideo.play();
+                        };
+
+                        // Setup ice handling
+                        yourConnection.onicecandidate = function (event) {
+
+
+                            if (event.candidate) {
+
+                                dd++;
+                                console.log("Ice candidate." + dd);
+                                console.log(event);
+
+                                send({
+                                    type: "candidate",
+                                    data: event.candidate
+                                });
+                            }
+                        };
+
+
+                        yourConnection.addEventListener("icegatheringstatechange", ev => {
+                            switch (yourConnection.iceGatheringState) {
+                                case "new":
+                                    console.log('gathering is either just starting or has been reset');
+                                    break;
+                                case "gathering":
+                                    console.log('gathering has begun or is ongoing');
+                                    break;
+                                case "complete":
+                                    console.log('gathering has ended');
+                                    break;
+                            }
+                        });
+                    }
+
+                    function hasUserMedia() {
+                        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+                        return !!navigator.getUserMedia;
+                    }
+
+                    function hasRTCPeerConnection() {
+                        window.RTCPeerConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection;
+                        window.RTCSessionDescription = window.RTCSessionDescription || window.webkitRTCSessionDescription || window.mozRTCSessionDescription;
+                        window.RTCIceCandidate = window.RTCIceCandidate || window.webkitRTCIceCandidate || window.mozRTCIceCandidate;
+                        return !!window.RTCPeerConnection;
+                    }
+
+                    callButton.addEventListener("click", function () {
+
+
+                        startPeerConnection();
+                    });
+
+                    function startPeerConnection() {
+
+                        console.log("Calling");
+
+
+                        yourConnection.createOffer().then(function (offer) {
+                            return yourConnection.setLocalDescription(offer);
+                        }).then(function () {
+                            // Send the offer to the remote peer using the signaling server
+                            send({
+                                type: "offer",
+                                data: yourConnection.localDescription,
+                            });
+                        }).catch((e) => {
+                            console.log(e);
+                        });
+
+
+
+
+                        //yourConnection.setLocalDescription(yourConnection.createOffer());
+                        // send the offer to the other peer
+
+
+//                            yourConnection.createOffer(function (offer) {
+//                                send({
+//                                    type: "offer",
+//                                    data: offer,
+//                                });
+//                                yourConnection.setLocalDescription(offer);
+//                            }, function (error) {
+//                                alert("An error has occurred.");
+//                            });
+                    }
+
+
+
+
+                    function onOffer(offer) {
+                        yourConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+                        yourConnection.createAnswer(function (answer) {
+                            yourConnection.setLocalDescription(answer);
+                            send({
+                                type: "answer",
+                                data: answer
+                            });
+                        }, function (error) {
+                            alert("An error has occurred");
+                        });
+                    }
+                    ;
+
+                    function onAnswer(answer) {
+                        yourConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                    }
+
+                    function onCandidate(candidate) {
+                        yourConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    }
+
+                    hangUpButton.addEventListener("click", function () {
+                        send({
+                            type: "leave"
+                        });
+
+                        onLeave();
+                    });
+
+                    function onLeave() {
+                        theirVideo.src = null;
+                        yourConnection.close();
+                        yourConnection.onicecandidate = null;
+                        yourConnection.onaddstream = null;
+                        setupPeerConnection(stream);
+                    }
+
+
+
+
+
+                });
+            </script>
+            <div class="row">
+                <div class="col-md-12">
+                    <form action="<?php echo $_SERVER['PHP_SELF'] ?>" method="POST">
+                        <input type="submit" name="logount" value="Logout" class="btn btn-danger pull-right"/> 
+                    </form>
+                </div>
+                <div class="col-md-12" >
+                    <div class="row">
+                        <div class="col-md-4">
+                            <b>Socket ID</b>
+                            <input type="text" id="socket-id" class="form-control"/>
+                        </div>
+
+                        <div class="col-md-4">
+                            <b>Remote Socket ID</b>
+                            <input type="text" id="remote-id" class="form-control"/>
+                        </div>
+                        <div class="col-md-4">
+                            <button id="call" class="btn btn-primary">Call</button>
+                            &nbsp;&nbsp;&nbsp;
+                            <button id="hang-up" class="btn btn-danger">Hang up</button>
+
+                        </div>
+                        <div class="col-md-12">
+                            <textarea id="text-message" class="form-control"></textarea>
+                            <button id="send-text-message" class="btn btn-info">Send</button>
+                        </div>
+                    </div>
+                    <div class="row">&nbsp;</div>
+                    <div class="row">
+                        <div class="col-md-4" style="border:solid black 1px">
+                            <h3>Own</h3>
+                            <video id="own-video" muted style="width: 100%"/>
+                        </div>
+                        <div class="col-md-4" style="border:solid black 1px">
+                            <h3>Remote</h3>
+                            <video id="remote-video" style="width: 100%"/>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <h2>Chat</h2>
+                        <span id="event-zone"></span>
+                        <div class="col-md-12" id="text-message-zone" style="height: 100px;overflow-y: auto"></div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        <script type="text/javascript">
+            function setCookie(cname, cvalue, exdays) {
+                var d = new Date();
+                d.setTime(d.getTime() + (exdays * 24 * 60 * 60 * 1000));
+                var expires = "expires=" + d.toUTCString();
+                document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+            }
+
+            function getCookie(cname) {
+                var name = cname + "=";
+                var ca = document.cookie.split(';');
+                for (var i = 0; i < ca.length; i++) {
+                    var c = ca[i];
+                    while (c.charAt(0) == ' ') {
+                        c = c.substring(1);
+                    }
+                    if (c.indexOf(name) == 0) {
+                        return c.substring(name.length, c.length);
+                    }
+                }
+                return "";
+            }
+
+            function checkCookie() {
+                var user = getCookie("username");
+                if (user != "") {
+                    alert("Welcome again " + user);
+                } else {
+                    user = prompt("Please enter your name:", "");
+                    if (user != "" && user != null) {
+                        setCookie("username", user, 365);
+                    }
+                }
+            }
+        </script>
+    </body>
+</html>
